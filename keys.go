@@ -90,7 +90,7 @@ func writeKey(key string) {
 	}
 	defer f.Close()
 
-	if _, err := f.WriteString("ssh-ed25519 " + key + "\n"); err != nil {
+	if _, err := f.WriteString("no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 " + key + "\n"); err != nil {
 		log.Fatalf("Error writing to authorized_keys: %v", err)
 	}
 
