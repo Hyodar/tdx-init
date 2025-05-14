@@ -71,7 +71,7 @@ func waitForKey() {
 		os.Exit(0) // Exit after successfully receiving the key
 	})
 
-	log.Fatal(http.ListenAndServe(":"+httpPort, nil))
+	log.Fatal(http.ListenAndServe("0.0.0.0:"+httpPort, nil))
 }
 
 func writeKey(key string) {
