@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 const (
@@ -31,11 +32,15 @@ func main() {
 
 	os.Setenv("PATH", "/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin")
 
-	devices, err := filepath.Glob(deviceGlob)
-	if err != nil || len(devices) == 0 {
-		log.Fatalln("Error: SCSI device not found")
+	for {
+		devices, err := filepath.Glob(deviceGlob)
+		if err == nil && len(devices) > 0 {
+			devicePath = devices[0]
+			break
+		}
+		log.Println("Waiting for SCSI device to appear...")
+		time.Sleep(2 * time.Second)
 	}
-	devicePath = devices[0]
 
 	switch os.Args[1] {
 	case "wait-for-key":
