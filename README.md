@@ -7,7 +7,7 @@ Currently designed specifically for Flashbots BoB VMs.
 
 - Allows VM operator to provision a VM with a searcher's SSH key
 - Stores searcher's SSH key directly in LUKS2 header
-- Automatically sets up persistant encrypted disk once searcher has provided a LUKS2 passphrase
+- Automatically sets up persistent encrypted disk once searcher has provided a LUKS2 passphrase
 
 ## Usage
 

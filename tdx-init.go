@@ -9,7 +9,7 @@ import (
 
 const (
 	keyFile      = "/etc/searcher_key"
-	deviceGlob   = "/dev/disk/by-path/*scsi-0:0:0:10"
+	deviceGlob   = "/dev/disk/by-path/*10"
 	sshDir       = "/home/searcher/.ssh"
 	mountPoint   = "/persistent"
 	mapperName   = "cryptdisk"
