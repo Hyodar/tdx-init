@@ -23,27 +23,33 @@ for key initialization, passphrase generation, and disk selection.`,
 }
 
 var setupCmd = &cobra.Command{
-	Use:   "setup",
+	Use:   "setup [config]",
 	Short: "Run the TDX setup process",
 	Long: `Runs the complete TDX setup process using configuration from a YAML file.
 This includes disk encryption, SSH key management, and persistent storage setup.`,
+	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		if len(args) > 0 {
+			configFile = args[0]
+		}
 		runSetup()
 	},
 }
 
 var validateCmd = &cobra.Command{
-	Use:   "validate",
+	Use:   "validate [config]",
 	Short: "Validate configuration file",
 	Long:  `Validates the YAML configuration file and displays the parsed configuration.`,
+	Args:  cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		if len(args) > 0 {
+			configFile = args[0]
+		}
 		validateConfig()
 	},
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", "config.yaml", "Configuration file path")
-
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(generateConfigCmd)
