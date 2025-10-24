@@ -1,14 +1,26 @@
 # tdx-init
 
-A configurable CLI tool for secure disk encryption and SSH key management in TDX (Trusted Domain Extensions) environments. Provides flexible strategies for key initialization, passphrase generation, and disk selection.
+A configurable CLI tool for secure disk encryption and SSH key management in TDX (Trusted Domain Extensions) environments. Provides flexible strategies for key initialization, passphrase generation, and disk selection with TPM support.
 
 ## Features
 
-- **Configurable Key Strategies**: Web server-based SSH key provisioning
-- **Flexible Passphrase Handling**: Random generation or named pipe input
-- **Disk Selection Options**: Largest available disk or path glob matching
-- **Secure SSH Configuration**: Automatically configures SSH with security restrictions
-- **LUKS2 Integration**: Stores SSH keys in LUKS2 headers for persistence
+- **YAML Configuration**: Flexible configuration system for all components
+- **TPM Integration**: Hardware-based key storage using TPM 2.0
+- **Multiple Key Strategies**: 
+  - Random generation with hardware RNG support
+  - Named pipe input for external key providers
+- **Flexible Disk Selection**:
+  - Largest available disk
+  - Path glob pattern matching
+- **Format Strategies**:
+  - `always`: Format on every run
+  - `on_initialize`: Format only on first setup (default)
+  - `never`: Never format, only mount existing
+- **SSH Key Persistence**: Store SSH keys in LUKS headers for persistence across reboots
+- **Security Features**:
+  - LUKS2 encryption with token support
+  - SSH restrictions (no-port-forwarding, no-agent-forwarding, no-X11-forwarding)
+  - Secure file permissions
 
 ## Installation
 
@@ -18,79 +30,142 @@ go build -o tdx-init ./cmd
 
 ## Usage
 
-### Quick Setup
+### Quick Start
 
-Run the complete setup process with default configuration:
-
+1. Generate an example configuration file:
 ```bash
-tdx-init setup
+./tdx-init generate-config
 ```
 
-### Configuration Options
+2. Customize the configuration (see `config.example.yaml`)
 
-View current configuration:
-
+3. Validate your configuration:
 ```bash
-tdx-init config
+./tdx-init validate config.yaml
 ```
 
-### Custom Configuration
-
-Configure key strategy:
+4. Run the setup:
 ```bash
-tdx-init setup --key-strategy.type webserver --key-strategy.server-url :8080
+./tdx-init setup config.yaml
 ```
 
-Configure passphrase strategy:
-```bash
-tdx-init setup --passphrase-strategy.type random
-# or
-tdx-init setup --passphrase-strategy.type namedpipe --passphrase-strategy.pipe-path /tmp/passphrase
+## Configuration
+
+The tool uses YAML configuration files. Here's a complete example:
+
+```yaml
+# SSH Configuration
+ssh:
+  strategy: "webserver"        # Currently only 'webserver' is supported
+  strategy_config:
+    server_url: "0.0.0.0:8080" # Address to listen for SSH keys
+  dir: "/root/.ssh"            # SSH directory
+  key_path: "/etc/root_key"    # Optional: store key separately
+  store_at: "disk_persistent"  # Optional: store in LUKS token
+
+# Encryption Keys
+keys:
+  key_persistent:
+    strategy: "random"         # Options: 'random', 'pipe'
+    tpm: true                  # Store in TPM if available
+    
+  # Example pipe strategy:
+  # key_external:
+  #   strategy: "pipe"
+  #   strategy_config:
+  #     pipe_path: "/tmp/passphrase"
+  #   tpm: false
+
+# Disk Configuration
+disks:
+  disk_persistent:
+    strategy: "largest"        # Options: 'largest', 'pathglob'
+    format: "on_initialize"    # Options: 'always', 'on_initialize', 'never'
+    encryption_key: "key_persistent"  # Reference to key in 'keys' section
+    mount_at: "/persistent"
+    
+  # Example pathglob strategy:
+  # disk_data:
+  #   strategy: "pathglob"
+  #   strategy_config:
+  #     path_glob: "/dev/nvme*"
+  #   format: "on_initialize"
+  #   mount_at: "/data"
 ```
 
-Configure disk strategy:
-```bash
-tdx-init setup --disk-strategy.type largest
-# or
-tdx-init setup --disk-strategy.type pathglob --disk-strategy.path-glob "/dev/sd*"
+## Architecture
+
+### Component Organization
+
+```
+pkg/
+├── config/          # Configuration parsing and validation
+├── keys/            # Key management strategies
+│   ├── random.go    # Random key generation with HW RNG support
+│   └── pipe.go      # Named pipe key input
+├── disks/           # Disk management
+│   ├── largest.go   # Find largest available disk
+│   ├── pathglob.go  # Match disks by pattern
+│   ├── luks.go      # LUKS operations
+│   └── filesystem.go # Filesystem operations
+├── ssh/             # SSH key management
+│   └── webserver.go # HTTP server for key reception
+├── tpm/             # TPM 2.0 integration
+└── setup/           # Orchestration layer
 ```
 
-### Global Options
+### How It Works
 
-```bash
-tdx-init setup \
-  --ssh-dir /root/.ssh \
-  --key-file /etc/root_key \
-  --mount-point /persistent \
-  --mapper-name cryptdisk \
-  --mapper-device /dev/mapper/cryptdisk
-```
+1. **Initial Setup**:
+   - Finds disk based on configured strategy
+   - Generates or receives encryption key
+   - Formats disk with LUKS2 if needed
+   - Stores initialization token in LUKS header
+   - Waits for SSH key via HTTP POST
+   - Stores SSH key in LUKS token (if configured)
 
-## Strategies
+2. **Subsequent Boots**:
+   - Detects existing LUKS container
+   - Retrieves SSH key from LUKS token (if stored)
+   - Retrieves encryption key from TPM (if available)
+   - Mounts encrypted filesystem
+   - Configures SSH access
 
-### Key Strategies
+### LUKS Token Usage
 
-- **webserver**: Waits for SSH key via HTTP server or extracts from existing LUKS header
+- **Token Slot 1**: SSH public key storage
+- **Token Slot 2**: Initialization state tracking
 
-### Passphrase Strategies
+### TPM Integration
 
-- **random**: Generates a secure random passphrase
-- **namedpipe**: Reads passphrase from a named pipe
+When TPM is available and enabled:
+- Keys are stored in TPM NV index (default: 0x1500016)
+- Automatic key retrieval on subsequent boots
+- Fallback to non-TPM operation if unavailable
 
-### Disk Strategies
+## Security Considerations
 
-- **largest**: Selects the largest available disk
-- **pathglob**: Selects disk matching a path pattern
-
-## Security Features
-
-- SSH keys are stored with security restrictions (`no-port-forwarding,no-agent-forwarding,no-X11-forwarding`)
-- Encrypted disk setup with LUKS2
-- Secure file permissions (0600/0700)
-- SSH key persistence in LUKS2 token metadata
+- **No Private Keys**: Only public SSH keys are handled
+- **Passphrase Security**: Encryption passphrases never stored on disk (only in TPM)
+- **SSH Restrictions**: Automatic security restrictions on SSH keys
+- **Secure Permissions**: Files created with appropriate permissions (0600/0700)
 
 ## Requirements
 
 - Go 1.22.1+
+- Linux with `/proc/partitions` support
 - cryptsetup (for LUKS operations)
-- Root privileges (for disk and SSH operations)
+- TPM 2.0 tools (optional, for TPM support)
+- Root privileges
+
+## Development
+
+The project uses a clean architecture with:
+- **Strategy Pattern**: For different implementations of key/disk/ssh strategies
+- **Factory Pattern**: For creating appropriate strategy instances
+- **Interface Segregation**: Clear interfaces between components
+- **Dependency Injection**: Managers receive their dependencies explicitly
+
+## License
+
+See LICENSE file for details.
