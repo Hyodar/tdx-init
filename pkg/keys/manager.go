@@ -20,12 +20,21 @@ func NewManager(cfg *config.Config) (*Manager, error) {
 		keys: make(map[string]Provider),
 	}
 
+	hasTPM := false
+
 	for name, keyCfg := range cfg.Keys {
 		provider, err := CreateProvider(keyCfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create key provider for %s: %w", name, err)
 		}
 		m.keys[name] = provider
+
+		if keyCfg.TPM {
+			if hasTPM {
+				return nil, fmt.Errorf("only one key with TPM enabled is supported")
+			}
+			hasTPM = true
+		}
 	}
 
 	return m, nil
