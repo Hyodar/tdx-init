@@ -5,82 +5,57 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"tdx-init/pkg/tdxsetup"
+	"tdx-init/pkg/config"
+	"tdx-init/pkg/setup"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
-type Config struct {
-	KeyStrategy struct {
-		Type      string
-		ServerURL string
-	}
-	PassphraseStrategy struct {
-		Type     string
-		PipePath string
-	}
-	DiskStrategy struct {
-		Type     string
-		PathGlob string
-	}
-	SSHDir       string
-	KeyFile      string
-	MountPoint   string
-	MapperName   string
-	MapperDevice string
-}
-
-var config Config
+var configFile string
 
 var rootCmd = &cobra.Command{
 	Use:   "tdx-init",
-	Short: "TDX Init CLI - Trusted Device Setup",
-	Long: `A CLI tool for setting up trusted device initialization with configurable
-strategies for key management, passphrase handling, and disk encryption.`,
+	Short: "TDX Init - Secure disk encryption and SSH key management",
+	Long: `A configurable CLI tool for secure disk encryption and SSH key management
+in TDX (Trusted Domain Extensions) environments. Provides flexible strategies
+for key initialization, passphrase generation, and disk selection.`,
 }
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Run the TDX setup process",
-	Long: `Runs the complete TDX setup process using the configured strategies for
-key initialization, passphrase generation, and disk management.`,
+	Long: `Runs the complete TDX setup process using configuration from a YAML file.
+This includes disk encryption, SSH key management, and persistent storage setup.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		runSetup(config)
+		runSetup()
 	},
 }
 
-var configCmd = &cobra.Command{
-	Use:   "config",
-	Short: "Show current configuration",
-	Long:  `Displays the current configuration settings for all strategies and options.`,
+var validateCmd = &cobra.Command{
+	Use:   "validate",
+	Short: "Validate configuration file",
+	Long:  `Validates the YAML configuration file and displays the parsed configuration.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		showConfig(config)
+		validateConfig()
 	},
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&config.SSHDir, "ssh-dir", "/root/.ssh", "SSH directory path")
-	rootCmd.PersistentFlags().StringVar(&config.KeyFile, "key-file", "/etc/root_key", "Key file path")
-	rootCmd.PersistentFlags().StringVar(&config.MountPoint, "mount-point", "/persistent", "Mount point for encrypted disk")
-	rootCmd.PersistentFlags().StringVar(&config.MapperName, "mapper-name", "cryptdisk", "Device mapper name")
-	rootCmd.PersistentFlags().StringVar(&config.MapperDevice, "mapper-device", "/dev/mapper/cryptdisk", "Device mapper path")
-
-	setupCmd.Flags().StringVar(&config.KeyStrategy.Type, "key-strategy.type", "webserver", "Key initialization strategy (webserver)")
-	setupCmd.Flags().StringVar(&config.KeyStrategy.ServerURL, "key-strategy.server-url", "0.0.0.0:8080", "URL for webserver key strategy")
-	setupCmd.Flags().StringVar(&config.PassphraseStrategy.Type, "passphrase-strategy.type", "random", "Passphrase strategy (random, namedpipe)")
-	setupCmd.Flags().StringVar(&config.PassphraseStrategy.PipePath, "passphrase-strategy.pipe-path", "/tmp/passphrase", "Path for named pipe passphrase strategy")
-	setupCmd.Flags().StringVar(&config.DiskStrategy.Type, "disk-strategy.type", "largest", "Disk strategy (largest, pathglob)")
-	setupCmd.Flags().StringVar(&config.DiskStrategy.PathGlob, "disk-strategy.path-glob", "*", "Path glob for pathglob disk strategy")
-
-	configCmd.Flags().StringVar(&config.KeyStrategy.Type, "key-strategy.type", "webserver", "Key initialization strategy (webserver)")
-	configCmd.Flags().StringVar(&config.KeyStrategy.ServerURL, "key-strategy.server-url", ":8080", "URL for webserver key strategy")
-	configCmd.Flags().StringVar(&config.PassphraseStrategy.Type, "passphrase-strategy.type", "random", "Passphrase strategy (random, namedpipe)")
-	configCmd.Flags().StringVar(&config.PassphraseStrategy.PipePath, "passphrase-strategy.pipe-path", "/tmp/passphrase", "Path for named pipe passphrase strategy")
-	configCmd.Flags().StringVar(&config.DiskStrategy.Type, "disk-strategy.type", "largest", "Disk strategy (largest, pathglob)")
-	configCmd.Flags().StringVar(&config.DiskStrategy.PathGlob, "disk-strategy.path-glob", "*", "Path glob for pathglob disk strategy")
+	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", "config.yaml", "Configuration file path")
 
 	rootCmd.AddCommand(setupCmd)
-	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(validateCmd)
+	rootCmd.AddCommand(generateConfigCmd)
+}
+
+var generateConfigCmd = &cobra.Command{
+	Use:   "generate-config",
+	Short: "Generate example configuration file",
+	Long:  `Generates an example YAML configuration file with all available options.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		generateConfig()
+	},
 }
 
 func main() {
@@ -90,90 +65,115 @@ func main() {
 	}
 }
 
-func runSetup(config Config) {
+func runSetup() {
+	cfg, err := config.LoadConfig(configFile)
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
+	orchestrator, err := setup.NewOrchestrator(cfg)
+	if err != nil {
+		log.Fatalf("Failed to create orchestrator: %v", err)
+	}
+
 	ctx := context.Background()
+	if err := orchestrator.Setup(ctx); err != nil {
+		log.Fatalf("Setup failed: %v", err)
+	}
+}
 
-	keyInit, err := createKeyInitializer(config)
+func validateConfig() {
+	cfg, err := config.LoadConfig(configFile)
 	if err != nil {
-		log.Fatal("Failed to create key initializer:", err)
+		log.Fatalf("Configuration validation failed: %v", err)
 	}
 
-	passphraseInit, err := createPassphraseInitializer(config)
+	fmt.Println("Configuration is valid!")
+	fmt.Println("\nParsed configuration:")
+
+	data, err := yaml.Marshal(cfg)
 	if err != nil {
-		log.Fatal("Failed to create passphrase initializer:", err)
+		log.Fatalf("Failed to marshal config: %v", err)
 	}
 
-	diskInit, err := createDiskInitializer(config)
-	if err != nil {
-		log.Fatal("Failed to create disk initializer:", err)
-	}
-
-	options := &tdxsetup.TdxSetupManagerOptions{
-		SSHDir:       config.SSHDir,
-		KeyFile:      config.KeyFile,
-		MountPoint:   config.MountPoint,
-		MapperName:   config.MapperName,
-		MapperDevice: config.MapperDevice,
-	}
-
-	manager := tdxsetup.NewSetupManager(keyInit, passphraseInit, diskInit, options)
-
-	fmt.Println("Starting TDX setup process...")
-	if err := manager.Setup(ctx); err != nil {
-		log.Fatal("Setup failed:", err)
-	}
-
-	fmt.Println("TDX setup completed successfully!")
+	fmt.Print(string(data))
 }
 
-func createKeyInitializer(config Config) (tdxsetup.KeyInitializerer, error) {
-	switch config.KeyStrategy.Type {
-	case "webserver":
-		return &tdxsetup.WebServerKeyInitializer{URL: config.KeyStrategy.ServerURL}, nil
-	default:
-		return nil, fmt.Errorf("unknown key strategy: %s", config.KeyStrategy.Type)
-	}
-}
+func generateConfig() {
+	exampleConfig := `# TDX-Init Configuration File
+# This configuration defines SSH key management, encryption keys, and disk setup
 
-func createPassphraseInitializer(config Config) (tdxsetup.PassphraseInitializerer, error) {
-	switch config.PassphraseStrategy.Type {
-	case "random":
-		return &tdxsetup.RandomPassphraseInitializer{}, nil
-	case "namedpipe":
-		return &tdxsetup.NamedPipePassphraseInitializer{PipePath: config.PassphraseStrategy.PipePath}, nil
-	default:
-		return nil, fmt.Errorf("unknown passphrase strategy: %s", config.PassphraseStrategy.Type)
-	}
-}
+# SSH Configuration
+ssh:
+  # Strategy for obtaining SSH keys
+  strategy: "webserver"  # Currently only 'webserver' is supported
+  
+  # Strategy-specific configuration
+  strategy_config:
+    # For webserver strategy: the address to listen on
+    server_url: "0.0.0.0:8080"
+  
+  # SSH directory where authorized_keys will be created
+  dir: "/root/.ssh"
+  
+  # Path to store the SSH key separately (optional)
+  key_path: "/etc/root_key"
+  
+  # Store SSH key in LUKS token of specified disk (optional)
+  # This allows the key to persist across reboots
+  store_at: "disk_persistent"
 
-func createDiskInitializer(config Config) (tdxsetup.DiskInitializerer, error) {
-	switch config.DiskStrategy.Type {
-	case "largest":
-		return &tdxsetup.LargestDiskInitializer{}, nil
-	case "pathglob":
-		return &tdxsetup.PathGlobDiskInitializer{PathGlob: config.DiskStrategy.PathGlob}, nil
-	default:
-		return nil, fmt.Errorf("unknown disk strategy: %s", config.DiskStrategy.Type)
-	}
-}
+# Encryption Key Configuration
+keys:
+  # Define one or more encryption keys
+  key_persistent:
+    # Strategy for key generation/retrieval
+    strategy: "random"  # Options: 'random', 'pipe'
+    
+    # For 'pipe' strategy, specify the pipe path:
+    # strategy_config:
+    #   pipe_path: "/tmp/passphrase"
+    
+    # Store key in TPM if available
+    tpm: true
 
-func showConfig(config Config) {
-	fmt.Println("Current Configuration:")
-	fmt.Printf("  Key Strategy: %s\n", config.KeyStrategy.Type)
-	if config.KeyStrategy.Type == "webserver" {
-		fmt.Printf("    Server URL: %s\n", config.KeyStrategy.ServerURL)
+# Disk Configuration
+disks:
+  # Define one or more disks to manage
+  disk_persistent:
+    # Strategy for finding the disk
+    strategy: "largest"  # Options: 'largest', 'pathglob'
+    
+    # For 'pathglob' strategy, specify the pattern:
+    # strategy_config:
+    #   path_glob: "/dev/sd*"
+    
+    # When to format the disk
+    # - 'always': Format on every run (DESTRUCTIVE!)
+    # - 'on_initialize': Format only if not already initialized (default)
+    # - 'never': Never format, only mount existing filesystems
+    format: "on_initialize"
+    
+    # Encryption key to use (references a key from 'keys' section)
+    # Leave empty for unencrypted disk
+    encryption_key: "key_persistent"
+    
+    # Where to mount the disk
+    mount_at: "/persistent"
+
+  # Example of an additional unencrypted disk:
+  # disk_data:
+  #   strategy: "pathglob"
+  #   strategy_config:
+  #     path_glob: "/dev/nvme*"
+  #   format: "on_initialize"
+  #   mount_at: "/data"
+`
+
+	filename := "config.example.yaml"
+	if err := os.WriteFile(filename, []byte(exampleConfig), 0644); err != nil {
+		log.Fatalf("Failed to write example config: %v", err)
 	}
-	fmt.Printf("  Passphrase Strategy: %s\n", config.PassphraseStrategy.Type)
-	if config.PassphraseStrategy.Type == "namedpipe" {
-		fmt.Printf("    Pipe Path: %s\n", config.PassphraseStrategy.PipePath)
-	}
-	fmt.Printf("  Disk Strategy: %s\n", config.DiskStrategy.Type)
-	if config.DiskStrategy.Type == "pathglob" {
-		fmt.Printf("    Path Glob: %s\n", config.DiskStrategy.PathGlob)
-	}
-	fmt.Printf("  SSH Directory: %s\n", config.SSHDir)
-	fmt.Printf("  Key File: %s\n", config.KeyFile)
-	fmt.Printf("  Mount Point: %s\n", config.MountPoint)
-	fmt.Printf("  Mapper Name: %s\n", config.MapperName)
-	fmt.Printf("  Mapper Device: %s\n", config.MapperDevice)
+
+	fmt.Printf("Example configuration written to %s\n", filename)
 }

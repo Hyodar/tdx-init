@@ -1,0 +1,68 @@
+# TDX-Init Configuration File
+# This configuration defines SSH key management, encryption keys, and disk setup
+
+# SSH Configuration
+ssh:
+  # Strategy for obtaining SSH keys
+  strategy: "webserver"  # Currently only 'webserver' is supported
+  
+  # Strategy-specific configuration
+  strategy_config:
+    # For webserver strategy: the address to listen on
+    server_url: "0.0.0.0:8080"
+  
+  # SSH directory where authorized_keys will be created
+  dir: "/root/.ssh"
+  
+  # Path to store the SSH key separately (optional)
+  key_path: "/etc/root_key"
+  
+  # Store SSH key in LUKS token of specified disk (optional)
+  # This allows the key to persist across reboots
+  store_at: "disk_persistent"
+
+# Encryption Key Configuration
+keys:
+  # Define one or more encryption keys
+  key_persistent:
+    # Strategy for key generation/retrieval
+    strategy: "random"  # Options: 'random', 'pipe'
+    
+    # For 'pipe' strategy, specify the pipe path:
+    # strategy_config:
+    #   pipe_path: "/tmp/passphrase"
+    
+    # Store key in TPM if available
+    tpm: true
+
+# Disk Configuration
+disks:
+  # Define one or more disks to manage
+  disk_persistent:
+    # Strategy for finding the disk
+    strategy: "largest"  # Options: 'largest', 'pathglob'
+    
+    # For 'pathglob' strategy, specify the pattern:
+    # strategy_config:
+    #   path_glob: "/dev/sd*"
+    
+    # When to format the disk
+    # - 'always': Format on every run (DESTRUCTIVE!)
+    # - 'on_initialize': Format only if not already initialized (default)
+    # - 'never': Never format, only mount existing filesystems
+    format: "on_initialize"
+    
+    # Encryption key to use (references a key from 'keys' section)
+    # Leave empty for unencrypted disk
+    encryption_key: "key_persistent"
+    
+    # Where to mount the disk
+    mount_at: "/persistent"
+
+  # Example of an additional unencrypted disk:
+  # disk_data:
+  #   strategy: "pathglob"
+  #   strategy_config:
+  #     path_glob: "/dev/nvme*"
+  #   format: "on_initialize"
+  #   mount_at: "/data"

@@ -1,27 +1,30 @@
-package tdxsetup
+package ssh
 
 import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"regexp"
 )
 
-type KeyInitializerer interface {
-	WaitForKey(ctx context.Context) (string, error)
+type WebServerProvider struct {
+	ServerURL string
 }
 
-type WebServerKeyInitializer struct {
-	URL string
+func NewWebServerProvider(serverURL string) *WebServerProvider {
+	return &WebServerProvider{
+		ServerURL: serverURL,
+	}
 }
 
-func (w *WebServerKeyInitializer) WaitForKey(ctx context.Context) (string, error) {
+func (w *WebServerProvider) WaitForKey(ctx context.Context) (string, error) {
 	keyReceivedChan := make(chan string)
 	serverErrChan := make(chan error)
 
 	server := &http.Server{
-		Addr: w.URL,
+		Addr: w.ServerURL,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost {
 				w.WriteHeader(http.StatusMethodNotAllowed)
@@ -46,9 +49,11 @@ func (w *WebServerKeyInitializer) WaitForKey(ctx context.Context) (string, error
 
 			keyReceivedChan <- key
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, "Key received and stored successfully")
+			fmt.Fprint(w, "SSH key received and stored successfully")
 		}),
 	}
+
+	log.Printf("Starting web server on %s to receive SSH key", w.ServerURL)
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -58,16 +63,12 @@ func (w *WebServerKeyInitializer) WaitForKey(ctx context.Context) (string, error
 
 	select {
 	case <-ctx.Done():
-		if err := server.Shutdown(context.Background()); err != nil {
-			return "", fmt.Errorf("server shutdown error: %w", err)
-		}
+		server.Shutdown(context.Background())
 		return "", ctx.Err()
 	case err := <-serverErrChan:
 		return "", fmt.Errorf("server error: %w", err)
 	case key := <-keyReceivedChan:
-		if err := server.Shutdown(context.Background()); err != nil {
-			return "", fmt.Errorf("server shutdown error: %w", err)
-		}
+		server.Shutdown(context.Background())
 		return key, nil
 	}
 }

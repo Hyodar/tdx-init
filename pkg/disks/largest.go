@@ -1,28 +1,20 @@
-package disk
+package disks
 
 import (
 	"bufio"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
 
-func FindFirstDiskByPathGlob(path string) (string, error) {
-	disks, err := filepath.Glob(fmt.Sprintf("/dev/disk/by-path/%s", path))
-	if err != nil {
-		return "", fmt.Errorf("failed to find disk by path: %w", err)
-	}
+type LargestDiskFinder struct{}
 
-	if len(disks) == 0 {
-		return "", fmt.Errorf("no disk found by path: %s", path)
-	}
-
-	return disks[0], nil
+func NewLargestDiskFinder() *LargestDiskFinder {
+	return &LargestDiskFinder{}
 }
 
-func FindLargestDisk() (string, error) {
+func (f *LargestDiskFinder) Find() (string, error) {
 	file, err := os.Open("/proc/partitions")
 	if err != nil {
 		return "", err
